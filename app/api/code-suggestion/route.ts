@@ -106,7 +106,10 @@ async function generateSuggestion(prompt: string): Promise<string> {
       }),
     });
 
-    if (!response.ok) throw new Error("Ollama connection failed");
+    if (!response.ok) {
+      console.warn("Ollama connection failed - AI suggestions disabled");
+      return "// AI suggestions require Ollama running on localhost:11434\n// Install: https://ollama.ai\n// Run: ollama run qwen2.5-coder:1.5b";
+    }
 
     const data = await response.json();
     let suggestion = data.response;
@@ -118,8 +121,8 @@ async function generateSuggestion(prompt: string): Promise<string> {
 
     return suggestion || "// No suggestion";
   } catch (error) {
-    console.error("Ollama Suggestion Error:", error);
-    return "// AI suggestion unavailable";
+    console.warn("Ollama not available - AI suggestions disabled:", error);
+    return "// AI suggestions require Ollama\n// Install from https://ollama.ai\n// Then run: ollama run qwen2.5-coder:1.5b";
   }
 }
 

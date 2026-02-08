@@ -3,13 +3,15 @@
 import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Copy, Trash2, Download } from "lucide-react";
+import { Search, Copy, Trash2, Download, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getTemplateLogs } from "@/features/playground/utils/fakeLogs";
 
 interface TerminalProps {
   className?: string;
   theme?: "dark" | "light";
   webContainerInstance?: any;
+  templateType?: string;
 }
 
 export interface TerminalRef {
@@ -24,15 +26,17 @@ const terminalThemes = {
 };
 
 const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
-  ({ className, theme = "dark", webContainerInstance }, ref) => {
+  ({ className, theme = "dark", webContainerInstance, templateType = "react" }, ref) => {
     const terminalRef = useRef<HTMLDivElement>(null);
     const term = useRef<any>(null);
     const fitAddon = useRef<any>(null);
     const searchAddon = useRef<any>(null);
     const shellProcess = useRef<any>(null);
-    
+    const fakeLogTimeouts = useRef<NodeJS.Timeout[]>([]);
+
     // Track if we have already run the start command
     const hasInitialized = useRef(false);
+    const hasStartedFakeLogs = useRef(false);
 
     const [isConnected, setIsConnected] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
@@ -77,8 +81,8 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
         term.current = terminal;
         fitAddon.current = fit;
         searchAddon.current = search;
-        
-        terminal.writeln("Click to focus terminal...");
+
+        // terminal.writeln("Click to focus terminal...");
       };
 
       initTerminal();
@@ -94,17 +98,60 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
         window.removeEventListener("resize", handleResize);
         term.current?.dispose();
         term.current = null;
+        fakeLogTimeouts.current.forEach(clearTimeout);
       };
     }, [theme]);
 
+    const runFakeLogs = async () => {
+      if (!term.current) return;
+
+      // Clear existing timeouts
+      fakeLogTimeouts.current.forEach(clearTimeout);
+      fakeLogTimeouts.current = [];
+
+      const logs = getTemplateLogs(templateType || "react");
+
+      term.current.writeln("\x1b[33m\r\n> Booting container...\x1b[0m\r\n");
+
+      let delay = 0;
+
+      // Simulate install logs
+      for (const line of logs.install) {
+        const timeout = setTimeout(() => {
+          term.current?.writeln(line);
+        }, delay);
+        fakeLogTimeouts.current.push(timeout);
+        delay += Math.random() * 50 + 20;
+      }
+
+      delay += 800;
+
+      // Simulate start logs
+      for (const line of logs.start) {
+        const timeout = setTimeout(() => {
+          term.current?.writeln(line);
+        }, delay);
+        fakeLogTimeouts.current.push(timeout);
+        delay += 200;
+      }
+    };
+
     // 2. Attach Shell & Auto-Run
     useEffect(() => {
-      if (!term.current || !webContainerInstance || shellProcess.current) return;
+      if (!term.current) return;
+
+      // Start fake logs immediately if not started
+      if (!hasStartedFakeLogs.current) {
+        hasStartedFakeLogs.current = true;
+        runFakeLogs();
+      }
+
+      if (!webContainerInstance || shellProcess.current) return;
 
       const startShell = async () => {
         try {
-          term.current.clear(); // Clean up previous output
-          
+          // Don't clear terminal to keep fake logs visible
+
           const process = await webContainerInstance.spawn("jsh", {
             terminal: { cols: term.current.cols, rows: term.current.rows },
           });
@@ -115,54 +162,68 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
           const input = process.input.getWriter();
           process.output.pipeTo(
             new WritableStream({
-              write(data) { term.current.write(data); },
+              write(data) {
+                // We can optionally filter out duplicate logs here if needed
+                term.current.write(data);
+              },
             })
           );
 
           term.current.onData((data: string) => { input.write(data); });
 
-          // --- AUTO START LOGIC ---
+          // --- AUTO START REAL COMMAND SILENTLY ---
           if (!hasInitialized.current) {
             hasInitialized.current = true;
-            // Wait a moment for the shell to be fully ready
+            // Wait a bit to align with fake logs 
             setTimeout(async () => {
-              term.current.writeln("\x1b[33m\r\n> Auto-installing dependencies & starting server...\x1b[0m\r\n");
-              // This writes the command directly into the shell
               await input.write("npm install && npm run dev\r");
-            }, 800);
+            }, 2000);
           }
           // ------------------------
 
           await process.exit;
           setIsConnected(false);
+          shellProcess.current = null;
         } catch (error) {
           console.error("Shell error:", error);
-          term.current.write("\r\n⚠️ Failed to start shell\r\n");
         }
       };
 
       startShell();
-    }, [webContainerInstance]);
+    }, [webContainerInstance, templateType]);
+
+    const manualStart = async () => {
+      // Restart fake logs for visual feedback
+      term.current?.clear();
+      runFakeLogs();
+
+      if (shellProcess.current && term.current) {
+        console.log("Manual start triggered");
+        const input = shellProcess.current.input.getWriter();
+        await input.write("npm install && npm run dev\r");
+        input.releaseLock();
+      }
+    };
 
     // Helpers
     const copyTerminalContent = async () => {
-        const selection = term.current?.getSelection();
-        if (selection) await navigator.clipboard.writeText(selection);
+      const selection = term.current?.getSelection();
+      if (selection) await navigator.clipboard.writeText(selection);
     };
 
     const downloadLog = () => {
-        if (!term.current) return;
-        const buffer = term.current.buffer.active;
-        let text = "";
-        for (let i = 0; i < buffer.length; i++) {
-            const line = buffer.getLine(i);
-            if (line) text += line.translateToString(true) + "\n";
-        }
-        const blob = new Blob([text], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = "terminal-log.txt"; a.click();
-        URL.revokeObjectURL(url);
+      if (!term.current) return;
+      const buffer = term.current.buffer.active;
+      let text = "";
+      for (let i = 0; i < buffer.length; i++) {
+        const line = buffer.getLine(i);
+        if (line) text += line.translateToString(true) + "\n";
+      }
+      const blob = new Blob([text], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "terminal-log.txt"; a.click();
+      URL.revokeObjectURL(url);
     };
 
     return (
@@ -172,7 +233,8 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
             Terminal {isConnected ? <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> : <span className="w-2 h-2 rounded-full bg-red-500" />}
           </span>
           <div className="flex gap-1">
-             {showSearch && (
+            <Button size="sm" variant="ghost" onClick={manualStart} title="Run Install & Dev"><Play className="h-3 w-3 text-green-500" /></Button>
+            {showSearch && (
               <Input
                 value={searchTerm}
                 onChange={(e) => { setSearchTerm(e.target.value); searchAddon.current?.findNext(e.target.value); }}

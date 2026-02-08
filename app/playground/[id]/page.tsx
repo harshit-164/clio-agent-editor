@@ -58,11 +58,12 @@ const MainPlaygroundPage: React.FC = () => {
     isOpen: false,
     title: "",
     description: "",
-    onConfirm: () => {},
-    onCancel: () => {},
+    onConfirm: () => { },
+    onCancel: () => { },
   });
 
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
+  const [isEdited, setIsEdited] = useState(false);
 
   // Custom hooks
   const { playgroundData, templateData, isLoading, error, saveTemplateData } =
@@ -108,7 +109,7 @@ const MainPlaygroundPage: React.FC = () => {
   React.useEffect(() => {
     if (templateData && !openFiles.length) {
 
-      
+
       setTemplateData(templateData);
     }
   }, [templateData, setTemplateData, openFiles.length]);
@@ -242,11 +243,11 @@ const MainPlaygroundPage: React.FC = () => {
         const updatedOpenFiles = openFiles.map((f) =>
           f.id === targetFileId
             ? {
-                ...f,
-                content: fileToSave.content,
-                originalContent: fileToSave.content,
-                hasUnsavedChanges: false,
-              }
+              ...f,
+              content: fileToSave.content,
+              originalContent: fileToSave.content,
+              hasUnsavedChanges: false,
+            }
             : f
         );
         setOpenFiles(updatedOpenFiles);
@@ -510,9 +511,12 @@ const MainPlaygroundPage: React.FC = () => {
                       <PlaygroundEditor
                         activeFile={activeFile}
                         content={activeFile?.content || ""}
-                        onContentChange={(value) =>
-                          activeFileId && updateFileContent(activeFileId, value)
-                        }
+                        onContentChange={(value) => {
+                          if (activeFileId) {
+                            setIsEdited(true);
+                            updateFileContent(activeFileId, value);
+                          }
+                        }}
                         suggestion={aiSuggestions.suggestion}
                         suggestionLoading={aiSuggestions.isLoading}
                         suggestionPosition={aiSuggestions.position}
@@ -533,13 +537,14 @@ const MainPlaygroundPage: React.FC = () => {
                         <ResizableHandle />
                         <ResizablePanel defaultSize={50}>
                           <WebContainerPreview
-                            templateData={templateData}
+                            templateData={templateData!}
                             instance={instance}
                             writeFileSync={writeFileSync}
                             isLoading={containerLoading}
                             error={containerError}
-                            serverUrl={serverUrl!}
-                            forceResetup={false}
+                            serverUrl={serverUrl}
+                            templateType={playgroundData?.template?.toLowerCase()}
+                            isEdited={isEdited}
                           />
                         </ResizablePanel>
                       </>
@@ -561,14 +566,14 @@ const MainPlaygroundPage: React.FC = () => {
           </div>
         </SidebarInset>
 
-      <ConfirmationDialog
-      isOpen={confirmationDialog.isOpen}
-      title={confirmationDialog.title}
-      description={confirmationDialog.description}
-      onConfirm={confirmationDialog.onConfirm}
-      onCancel={confirmationDialog.onCancel}
-      setIsOpen={(open) => setConfirmationDialog((prev) => ({ ...prev, isOpen: open }))}
-      />
+        <ConfirmationDialog
+          isOpen={confirmationDialog.isOpen}
+          title={confirmationDialog.title}
+          description={confirmationDialog.description}
+          onConfirm={confirmationDialog.onConfirm}
+          onCancel={confirmationDialog.onCancel}
+          setIsOpen={(open) => setConfirmationDialog((prev) => ({ ...prev, isOpen: open }))}
+        />
       </>
     </TooltipProvider>
   );

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { WebContainer } from '@webcontainer/api';
 import { TemplateFolder } from '@/features/playground/types'; // Make sure this path matches your project
 import { webContainerService } from '../service/webContainerService';
+import { convertToFileSystemTree } from '../utils/convertToFileSystemTree';
 
 interface UseWebContainerProps {
   templateData: TemplateFolder;
@@ -20,7 +21,7 @@ export const useWebContainer = ({ templateData }: UseWebContainerProps): UseWebC
   const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   const isMounted = useRef(false);
 
   useEffect(() => {
@@ -30,23 +31,26 @@ export const useWebContainer = ({ templateData }: UseWebContainerProps): UseWebC
       try {
         setIsLoading(true);
         const webContainer = await webContainerService.getWebContainer();
-        
+
         if (active) {
           setInstance(webContainer);
+          console.log("WebContainer Instance SET in hook");
 
           // 1. Listen for when the server (localhost:3000) is ready
           webContainer.on('server-ready', (port, url) => {
             console.log(`Server ready at ${url}`);
             setServerUrl(url);
           });
-          
+
           // 2. Mount Files (only once)
           if (!isMounted.current && templateData) {
             console.log("Mounting files...");
-            await webContainer.mount(templateData);
+            const fileSystemTree = convertToFileSystemTree(templateData);
+            console.log("FileSystemTree:", fileSystemTree);
+            await webContainer.mount(fileSystemTree);
             isMounted.current = true;
           }
-          
+
           setIsLoading(false);
         }
       } catch (err: any) {
