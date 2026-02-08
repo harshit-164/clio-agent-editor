@@ -1,0 +1,11 @@
+{
+  "name": "express-starter",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "express": "latest"
+  }
+}

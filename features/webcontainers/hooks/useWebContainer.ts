@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { WebContainer } from '@webcontainer/api';
-import { TemplateFolder } from '@/features/playground/types'; // Updated import path to match your types
-import { webContainerService } from '../service/webContainerService'; // Import the service we just fixed
+import { TemplateFolder } from '@/features/playground/types'; // Make sure this path matches your project
+import { webContainerService } from '../service/webContainerService';
 
 interface UseWebContainerProps {
   templateData: TemplateFolder;
@@ -9,6 +9,7 @@ interface UseWebContainerProps {
 
 interface UseWebContainerReturn {
   instance: WebContainer | null;
+  serverUrl: string | null; // <--- Added this to track the preview URL
   isLoading: boolean;
   error: string | null;
   writeFileSync: (path: string, content: string) => Promise<void>;
@@ -16,10 +17,10 @@ interface UseWebContainerReturn {
 
 export const useWebContainer = ({ templateData }: UseWebContainerProps): UseWebContainerReturn => {
   const [instance, setInstance] = useState<WebContainer | null>(null);
+  const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Use a ref to track if we've already mounted files
   const isMounted = useRef(false);
 
   useEffect(() => {
@@ -28,18 +29,21 @@ export const useWebContainer = ({ templateData }: UseWebContainerProps): UseWebC
     const init = async () => {
       try {
         setIsLoading(true);
-        // GET the singleton instance instead of booting a new one
         const webContainer = await webContainerService.getWebContainer();
         
         if (active) {
           setInstance(webContainer);
+
+          // 1. Listen for when the server (localhost:3000) is ready
+          webContainer.on('server-ready', (port, url) => {
+            console.log(`Server ready at ${url}`);
+            setServerUrl(url);
+          });
           
-          // Only mount files once per session to avoid overwriting user changes on re-renders
+          // 2. Mount Files (only once)
           if (!isMounted.current && templateData) {
-            console.log("Mounting files to WebContainer...");
-            // Convert your templateData format to WebContainer's FileSystemTree format if needed
-            // For now, assuming you handle the initial file mount logic elsewhere or here
-            // If you need to mount immediately, use webContainer.mount(tree)
+            console.log("Mounting files...");
+            await webContainer.mount(templateData);
             isMounted.current = true;
           }
           
@@ -56,12 +60,10 @@ export const useWebContainer = ({ templateData }: UseWebContainerProps): UseWebC
 
     init();
 
-    // CLEANUP: We DO NOT teardown the instance here.
-    // We want it to stay alive even if this component unmounts (tab switch).
     return () => {
       active = false;
     };
-  }, []); // Empty dependency array = run once on mount
+  }, [templateData]); // Re-run if templateData changes (be careful with this dependency)
 
   const writeFileSync = useCallback(async (path: string, content: string) => {
     if (!instance) return;
@@ -74,6 +76,7 @@ export const useWebContainer = ({ templateData }: UseWebContainerProps): UseWebC
 
   return {
     instance,
+    serverUrl, // <--- Return the URL
     isLoading,
     error,
     writeFileSync,
