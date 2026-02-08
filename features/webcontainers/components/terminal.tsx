@@ -48,99 +48,26 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
     const term = useRef<any>(null);
     const fitAddon = useRef<any>(null);
     const searchAddon = useRef<any>(null);
+    const shellProcess = useRef<any>(null); // Track the shell process
 
     const [isConnected, setIsConnected] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [showSearch, setShowSearch] = useState(false);
 
-    const currentLine = useRef("");
-    const commandHistory = useRef<string[]>([]);
-    const historyIndex = useRef(-1);
-    const currentProcess = useRef<any>(null);
-
-    const writePrompt = useCallback(() => {
-      term.current?.write("\r\n$ ");
-      currentLine.current = "";
-    }, []);
-
+    // Expose methods to parent
     useImperativeHandle(ref, () => ({
       writeToTerminal: (data: string) => term.current?.write(data),
       clearTerminal: () => {
         term.current?.clear();
-        writePrompt();
       },
       focusTerminal: () => term.current?.focus(),
     }));
 
-    const handleTerminalInput = useCallback(
-      async (data: string) => {
-        if (!term.current) return;
-
-        if (data === "\r") {
-          const command = currentLine.current.trim();
-          commandHistory.current.push(command);
-          historyIndex.current = commandHistory.current.length;
-          term.current.writeln("");
-
-          if (!command) {
-            writePrompt();
-            return;
-          }
-
-          if (command === "clear") {
-            term.current.clear();
-            writePrompt();
-            return;
-          }
-
-          if (webContainerInstance) {
-            try {
-              const [cmd, ...args] = command.split(" ");
-              const process = await webContainerInstance.spawn(cmd, args, {
-                terminal: {
-                  cols: term.current.cols,
-                  rows: term.current.rows,
-                },
-              });
-
-              currentProcess.current = process;
-
-              process.output.pipeTo(
-                new WritableStream({
-                  write(chunk) {
-                    term.current?.write(chunk);
-                  },
-                })
-              );
-
-              await process.exit;
-            } catch {
-              term.current.writeln("Command not found");
-            }
-          }
-
-          writePrompt();
-          return;
-        }
-
-        if (data === "\u007F") {
-          if (currentLine.current.length > 0) {
-            currentLine.current = currentLine.current.slice(0, -1);
-            term.current.write("\b \b");
-          }
-          return;
-        }
-
-        currentLine.current += data;
-        term.current.write(data);
-      },
-      [webContainerInstance, writePrompt]
-    );
-
-    const initializeTerminal = useCallback(() => {
+    // 1. Initialize Terminal UI
+    useEffect(() => {
       if (!terminalRef.current || term.current) return;
 
-      (async () => {
+      const initTerminal = async () => {
         const { Terminal } = await import("xterm");
         const { FitAddon } = await import("xterm-addon-fit");
         const { WebLinksAddon } = await import("xterm-addon-web-links");
@@ -150,8 +77,10 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
         const terminal = new Terminal({
           cursorBlink: true,
           fontSize: 14,
+          fontFamily: 'Menlo, Monaco, "Courier New", monospace',
           theme: terminalThemes[theme],
           scrollback: 1000,
+          convertEol: true, // Help with line endings
         });
 
         const fit = new FitAddon();
@@ -164,52 +93,101 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
         terminal.open(terminalRef.current!);
         fit.fit();
 
-        terminal.onData(handleTerminalInput);
-
-        terminal.writeln("🚀 WebContainer Terminal");
-        terminal.writeln("Type commands and press Enter");
-        writePrompt();
-
         term.current = terminal;
         fitAddon.current = fit;
         searchAddon.current = search;
 
-        setIsConnected(true);
-      })();
-    }, [handleTerminalInput, theme, writePrompt]);
+        terminal.writeln("🚀 Starting WebContainer Shell...");
+      };
 
-    useEffect(() => {
-      initializeTerminal();
+      initTerminal();
 
-      const observer = new ResizeObserver(() => {
+      // Handle Resize
+      const handleResize = () => {
         fitAddon.current?.fit();
-      });
+        if (shellProcess.current && term.current) {
+          shellProcess.current.resize({
+            cols: term.current.cols,
+            rows: term.current.rows,
+          });
+        }
+      };
 
-      if (terminalRef.current) observer.observe(terminalRef.current);
+      window.addEventListener("resize", handleResize);
 
       return () => {
-        observer.disconnect();
+        window.removeEventListener("resize", handleResize);
         term.current?.dispose();
         term.current = null;
       };
-    }, [initializeTerminal]);
+    }, [theme]);
 
+    // 2. Attach Shell when WebContainer is ready
+    useEffect(() => {
+      if (!term.current || !webContainerInstance) return;
+
+      // Prevent spawning multiple shells for this component instance
+      if (shellProcess.current) return;
+
+      const startShell = async () => {
+        try {
+          // Clear initial loading message
+          term.current.clear();
+          
+          // Spawn the system shell (jsh)
+          const process = await webContainerInstance.spawn("jsh", {
+            terminal: {
+              cols: term.current.cols,
+              rows: term.current.rows,
+            },
+          });
+
+          shellProcess.current = process;
+          setIsConnected(true);
+
+          // Pipe process output to terminal
+          process.output.pipeTo(
+            new WritableStream({
+              write(data) {
+                term.current.write(data);
+              },
+            })
+          );
+
+          // Pipe terminal input to process
+          const input = process.input.getWriter();
+          term.current.onData((data: string) => {
+            input.write(data);
+          });
+
+          await process.exit;
+          setIsConnected(false);
+          
+        } catch (error) {
+          console.error("Failed to start shell:", error);
+          term.current.write("\r\n⚠️ Failed to start shell\r\n");
+        }
+      };
+
+      startShell();
+    }, [webContainerInstance]);
+
+    // Utility Functions
     const copyTerminalContent = async () => {
       const selection = term.current?.getSelection();
-      if (selection) await navigator.clipboard.writeText(selection);
+      if (selection) {
+        await navigator.clipboard.writeText(selection);
+      }
     };
 
     const downloadLog = () => {
       if (!term.current) return;
-
       const buffer = term.current.buffer.active;
       let text = "";
-
       for (let i = 0; i < buffer.length; i++) {
         const line = buffer.getLine(i);
         if (line) text += line.translateToString(true) + "\n";
       }
-
       const blob = new Blob([text], { type: "text/plain" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -222,8 +200,8 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
     return (
       <div className={cn("flex flex-col h-full border rounded-lg", className)}>
         <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/50">
-          <span className="text-sm font-medium">
-            Terminal {isConnected && "●"}
+          <span className="text-sm font-medium flex items-center gap-2">
+            Terminal {isConnected ? <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> : <span className="w-2 h-2 rounded-full bg-red-500" />}
           </span>
 
           <div className="flex gap-1">
@@ -259,7 +237,7 @@ const TerminalComponent = forwardRef<TerminalRef, TerminalProps>(
 
         <div
           ref={terminalRef}
-          className="flex-1 p-2"
+          className="flex-1 p-2 overflow-hidden"
           style={{ background: terminalThemes[theme].background }}
         />
       </div>

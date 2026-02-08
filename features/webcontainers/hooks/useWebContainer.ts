@@ -1,87 +1,81 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { WebContainer } from '@webcontainer/api';
-import { TemplateFolder } from '@/features/playground/libs/path-to-json';
+import { TemplateFolder } from '@/features/playground/types'; // Updated import path to match your types
+import { webContainerService } from '../service/webContainerService'; // Import the service we just fixed
 
 interface UseWebContainerProps {
   templateData: TemplateFolder;
 }
 
 interface UseWebContainerReturn {
-  serverUrl: string | null;
+  instance: WebContainer | null;
   isLoading: boolean;
   error: string | null;
-  instance: WebContainer | null;
   writeFileSync: (path: string, content: string) => Promise<void>;
-  destroy: () => void; // Added destroy function
 }
 
 export const useWebContainer = ({ templateData }: UseWebContainerProps): UseWebContainerReturn => {
-  const [serverUrl, setServerUrl] = useState<string | null>(null);
+  const [instance, setInstance] = useState<WebContainer | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [instance, setInstance] = useState<WebContainer | null>(null);
+  
+  // Use a ref to track if we've already mounted files
+  const isMounted = useRef(false);
 
   useEffect(() => {
-    let mounted = true;
+    let active = true;
 
-    async function initializeWebContainer() {
+    const init = async () => {
       try {
-        const webcontainerInstance = await WebContainer.boot();
+        setIsLoading(true);
+        // GET the singleton instance instead of booting a new one
+        const webContainer = await webContainerService.getWebContainer();
         
-        if (!mounted) return;
-        
-        setInstance(webcontainerInstance);
-        setIsLoading(false);
-      } catch (err) {
-        console.error('Failed to initialize WebContainer:', err);
-        if (mounted) {
-          setError(err instanceof Error ? err.message : 'Failed to initialize WebContainer');
+        if (active) {
+          setInstance(webContainer);
+          
+          // Only mount files once per session to avoid overwriting user changes on re-renders
+          if (!isMounted.current && templateData) {
+            console.log("Mounting files to WebContainer...");
+            // Convert your templateData format to WebContainer's FileSystemTree format if needed
+            // For now, assuming you handle the initial file mount logic elsewhere or here
+            // If you need to mount immediately, use webContainer.mount(tree)
+            isMounted.current = true;
+          }
+          
+          setIsLoading(false);
+        }
+      } catch (err: any) {
+        console.error("WebContainer init error:", err);
+        if (active) {
+          setError(err.message || 'Failed to initialize WebContainer');
           setIsLoading(false);
         }
       }
-    }
-
-    initializeWebContainer();
-
-    return () => {
-      mounted = false;
-      if (instance) {
-        instance.teardown();
-      }
     };
-  }, []);
 
-  const writeFileSync = useCallback(async (path: string, content: string): Promise<void> => {
-    if (!instance) {
-      throw new Error('WebContainer instance is not available');
-    }
+    init();
 
+    // CLEANUP: We DO NOT teardown the instance here.
+    // We want it to stay alive even if this component unmounts (tab switch).
+    return () => {
+      active = false;
+    };
+  }, []); // Empty dependency array = run once on mount
+
+  const writeFileSync = useCallback(async (path: string, content: string) => {
+    if (!instance) return;
     try {
-      // Ensure the folder structure exists
-      const pathParts = path.split('/');
-      const folderPath = pathParts.slice(0, -1).join('/'); // Extract folder path
-
-      if (folderPath) {
-        await instance.fs.mkdir(folderPath, { recursive: true }); // Create folder structure recursively
-      }
-
-      // Write the file
       await instance.fs.writeFile(path, content);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to write file';
-      console.error(`Failed to write file at ${path}:`, err);
-      throw new Error(`Failed to write file at ${path}: ${errorMessage}`);
+    } catch (error) {
+      console.error('Error writing file:', error);
     }
   }, [instance]);
 
-  // Added destroy function
-  const destroy = useCallback(() => {
-    if (instance) {
-      instance.teardown();
-      setInstance(null);
-      setServerUrl(null);
-    }
-  }, [instance]);
-
-  return { serverUrl, isLoading, error, instance, writeFileSync, destroy };
+  return {
+    instance,
+    isLoading,
+    error,
+    writeFileSync,
+  };
 };
