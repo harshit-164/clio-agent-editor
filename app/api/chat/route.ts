@@ -1,17 +1,17 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server";
 
 interface ChatMessage {
-  role: "user" | "assistant"
-  content: string
+  role: "user" | "assistant";
+  content: string;
 }
 
 interface EnhancePromptRequest {
-  prompt: string
+  prompt: string;
   context?: {
-    fileName?: string
-    language?: string
-    codeContent?: string
-  }
+    fileName?: string;
+    language?: string;
+    codeContent?: string;
+  };
 }
 
 async function generateAIResponse(messages: ChatMessage[]) {
@@ -23,164 +23,118 @@ async function generateAIResponse(messages: ChatMessage[]) {
 - Code reviews and optimizations
 
 Always provide clear, practical answers. When showing code, use proper formatting with language-specific syntax.
-Keep responses concise but comprehensive. Use code blocks with language specification when providing code examples.`
+Keep responses concise but comprehensive. Use code blocks with language specification when providing code examples.`;
 
-  const fullMessages = [{ role: "system", content: systemPrompt }, ...messages]
-
-  const prompt = fullMessages.map((msg) => `${msg.role}: ${msg.content}`).join("\n\n")
-
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 15000)
+  // Format the conversation history into a single prompt string for Ollama
+  const fullMessages = [{ role: "system", content: systemPrompt }, ...messages];
+  const prompt = fullMessages
+    .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
+    .join("\n\n");
 
   try {
     const response = await fetch("http://localhost:11434/api/generate", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "codellama:latest",
-        prompt,
+        model: "qwen2.5-coder:1.5b",
+        prompt: prompt,
         stream: false,
         options: {
           temperature: 0.7,
           top_p: 0.9,
-          max_tokens: 1000,
-          num_predict: 1000,
-          repeat_penalty: 1.1,
-          context_length: 4096,
+          num_predict: 2048,
         },
       }),
-      signal: controller.signal,
-    })
-
-    clearTimeout(timeoutId)
+    });
 
     if (!response.ok) {
-      const errorText = await response.text()
-      console.error("Error from AI model API:", errorText)
-      throw new Error(`AI model API error: ${response.status} - ${errorText}`)
+      throw new Error(`Ollama Chat Error: ${response.statusText}`);
     }
 
-    const data = await response.json()
-    if (!data.response) {
-      throw new Error("No response from AI model")
-    }
-    return data.response.trim()
+    const data = await response.json();
+    return data.response.trim();
   } catch (error) {
-    clearTimeout(timeoutId)
-    if ((error as Error).name === "AbortError") {
-      throw new Error("Request timeout: AI model took too long to respond")
-    }
-    console.error("AI generation error:", error)
-    throw error
+    console.error("Ollama Chat Error:", error);
+    throw error;
   }
 }
 
 async function enhancePrompt(request: EnhancePromptRequest) {
-  const enhancementPrompt = `You are a prompt enhancement assistant. Take the user's basic prompt and enhance it to be more specific, detailed, and effective for a coding AI assistant.
-
+  const enhancementPrompt = `You are a prompt enhancement assistant. Take the following basic prompt and make it more detailed and effective for a coding assistant.
+  
 Original prompt: "${request.prompt}"
 
-Context: ${request.context ? JSON.stringify(request.context, null, 2) : "No additional context"}
-
-Enhanced prompt should:
-- Be more specific and detailed
-- Include relevant technical context
-- Ask for specific examples or explanations
-- Be clear about expected output format
-- Maintain the original intent
-
-Return only the enhanced prompt, nothing else.`
+Return only the enhanced prompt text, no explanations.`;
 
   try {
     const response = await fetch("http://localhost:11434/api/generate", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "codellama:latest",
+        model: "qwen2.5-coder:1.5b",
         prompt: enhancementPrompt,
         stream: false,
         options: {
           temperature: 0.3,
-          max_tokens: 500,
+          num_predict: 500,
         },
       }),
-    })
+    });
 
-    if (!response.ok) {
-      throw new Error("Failed to enhance prompt")
-    }
+    if (!response.ok) return request.prompt;
 
-    const data = await response.json()
-    return data.response?.trim() || request.prompt
+    const data = await response.json();
+    return data.response.trim() || request.prompt;
   } catch (error) {
-    console.error("Prompt enhancement error:", error)
-    return request.prompt // Return original if enhancement fails
+    console.error("Prompt enhancement error:", error);
+    return request.prompt;
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
+    const body = await req.json();
 
     // Handle prompt enhancement
     if (body.action === "enhance") {
-      const enhancedPrompt = await enhancePrompt(body as EnhancePromptRequest)
-      return NextResponse.json({ enhancedPrompt })
+      const enhancedPrompt = await enhancePrompt(body as EnhancePromptRequest);
+      return NextResponse.json({ enhancedPrompt });
     }
 
     // Handle regular chat
-    const { message, history } = body
+    const { message, history } = body;
 
     if (!message || typeof message !== "string") {
-      return NextResponse.json({ error: "Message is required and must be a string" }, { status: 400 })
+      return NextResponse.json(
+        { error: "Message is required" },
+        { status: 400 }
+      );
     }
 
     const validHistory = Array.isArray(history)
-      ? history.filter(
-          (msg: any) =>
-            msg &&
-            typeof msg === "object" &&
-            typeof msg.role === "string" &&
-            typeof msg.content === "string" &&
-            ["user", "assistant"].includes(msg.role),
-        )
-      : []
+      ? history.filter((msg: any) => ["user", "assistant"].includes(msg.role))
+      : [];
 
-    const recentHistory = validHistory.slice(-10)
-    const messages: ChatMessage[] = [...recentHistory, { role: "user", content: message }]
+    const messages: ChatMessage[] = [
+      ...validHistory.slice(-10),
+      { role: "user", content: message },
+    ];
 
-    const aiResponse = await generateAIResponse(messages)
-
-    if (!aiResponse) {
-      throw new Error("Empty response from AI model")
-    }
+    const aiResponse = await generateAIResponse(messages);
 
     return NextResponse.json({
       response: aiResponse,
       timestamp: new Date().toISOString(),
-    })
-  } catch (error) {
-    console.error("Error in AI chat route:", error)
-    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+    });
+  } catch (error: any) {
+    console.error("Error in AI chat route:", error);
     return NextResponse.json(
-      {
-        error: "Failed to generate AI response",
-        details: errorMessage,
-        timestamp: new Date().toISOString(),
-      },
-      { status: 500 },
-    )
+      { error: "Failed to generate AI response", details: error.message },
+      { status: 500 }
+    );
   }
 }
 
 export async function GET() {
-  return NextResponse.json({
-    status: "AI Chat API is running",
-    timestamp: new Date().toISOString(),
-    info: "Use POST method to send chat messages or enhance prompts",
-  })
+  return NextResponse.json({ status: "Qwen Ollama Chat API is running" });
 }
