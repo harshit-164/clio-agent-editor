@@ -25,51 +25,60 @@ export const usePlayground = (id: string): UsePlaygroundReturn => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadPlayground = useCallback(async () => {
-    if (!id) return;
 
-    try {
-      setIsLoading(true);
-      setError(null);
+  // features/playground/hooks/usePlayground.tsx
+const loadPlayground = useCallback(async () => {
+  if (!id) return;
 
-      const data = await getPlaygroundById(id);
-    //   @ts-ignore
-      setPlaygroundData(data);
+  try {
+    setIsLoading(true);
+    setError(null);
 
-      const rawContent = data?.templateFiles?.[0]?.content;
-      if (typeof rawContent === "string") {
-        const parsedContent = JSON.parse(rawContent);
-        setTemplateData(parsedContent);
-        toast.success("Playground loaded successfully");
-        return;
-      }
+    const data = await getPlaygroundById(id);
+    setPlaygroundData(data);
 
-      // Load template from API if not in saved content
-      const res = await fetch(`/api/template/${id}`);
-      if (!res.ok) throw new Error(`Failed to load template: ${res.status}`);
-
-      const templateRes = await res.json();
-      if (templateRes.templateJson && Array.isArray(templateRes.templateJson)) {
-        setTemplateData({
-          folderName: "Root",
-          items: templateRes.templateJson,
-        });
-      } else {
-        setTemplateData(templateRes.templateJson || {
-          folderName: "Root",
-          items: [],
-        });
-      }
-
-      toast.success("Template loaded successfully");
-    } catch (error) {
-      console.error("Error loading playground:", error);
-      setError("Failed to load playground data");
-      toast.error("Failed to load playground data");
-    } finally {
-      setIsLoading(false);
+    const rawContent = data?.templateFiles?.[0]?.content;
+    if (typeof rawContent === "string") {
+      const parsedContent = JSON.parse(rawContent);
+      setTemplateData(parsedContent);
+      toast.success("Playground loaded successfully");
+      return;
     }
-  }, [id]);
+
+    // Load template from API if not in saved content
+    console.log("Fetching template from API for ID:", id);
+    const res = await fetch(`/api/template/${id}`);
+    
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.details || `Failed to load template: ${res.status}`);
+    }
+
+    const templateRes = await res.json();
+    console.log("Template response:", templateRes);
+    
+    if (templateRes.templateJson && Array.isArray(templateRes.templateJson)) {
+      setTemplateData({
+        folderName: "Root",
+        items: templateRes.templateJson,
+      });
+    } else {
+      setTemplateData(templateRes.templateJson || {
+        folderName: "Root",
+        items: [],
+      });
+    }
+
+    toast.success("Template loaded successfully");
+  } catch (error) {
+    console.error("Error loading playground:", error);
+    const errorMessage = error instanceof Error ? error.message : "Failed to load playground data";
+    setError(errorMessage);
+    toast.error(errorMessage);
+  } finally {
+    setIsLoading(false);
+  }
+}, [id]);
 
   const saveTemplateData = useCallback(async (data: TemplateFolder) => {
     try {
