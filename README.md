@@ -2,7 +2,7 @@
 
 ![Vibecode Editor Thumbnail](public/vibe-code-editor-thumbnail.svg)
 
-**Vibecode Editor** is a blazing-fast, AI-integrated web IDE built entirely in the browser using **Next.js App Router**, **WebContainers**, **Monaco Editor**, and **local LLMs via Ollama**. It offers real-time code execution, an AI-powered chat assistant, and support for multiple tech stacks — all wrapped in a stunning developer-first UI.
+**Vibecode Editor** is a blazing-fast, AI-integrated web IDE built entirely in the browser using **Next.js 15 App Router**, **WebContainers**, **Monaco Editor**, and **Qwen 2.5 Coder via Ollama**. It offers real-time code execution, an AI-powered chat assistant, and support for multiple tech stacks — all wrapped in a stunning developer-first UI.
 
 ---
 
@@ -25,15 +25,18 @@
 
 | Layer         | Technology                                   |
 |---------------|----------------------------------------------|
-| Framework     | Next.js 15 (App Router)                      |
-| Styling       | TailwindCSS, ShadCN UI                       |
-| Language      | TypeScript                                   |
-| Auth          | NextAuth (Google + GitHub OAuth)             |
-| Editor        | Monaco Editor                                |
-| AI Suggestion | Ollama (LLMs running locally via Docker)     |
-| Runtime       | WebContainers                                |
-| Terminal      | xterm.js                                     |
-| Database      | MongoDB (via DATABASE_URL)                   |
+| Framework     | Next.js 15.3.1 (App Router)                  |
+| UI Library    | React 19.0.0                                 |
+| Styling       | TailwindCSS 4.x + ShadCN UI + Radix UI       |
+| Language      | TypeScript 5.x                               |
+| Auth          | NextAuth v5 (Google + GitHub OAuth)          |
+| Editor        | Monaco Editor 0.52.2                         |
+| AI Model      | Qwen 2.5 Coder 1.5B (via Ollama)             |
+| Runtime       | WebContainers 1.6.1                          |
+| Terminal      | xterm.js 5.5.0 (with WebGL addon)            |
+| Database      | MongoDB + Prisma ORM 6.10.0                  |
+| State         | Zustand 5.0.5                                |
+| Forms         | React Hook Form + Zod                        |
 
 ---
 
@@ -74,13 +77,13 @@ NEXTAUTH_URL=http://localhost:3000
 
 ### 4. Start Local Ollama Model
 
-Make sure [Ollama](https://ollama.com/) and Docker are installed, then run:
+Make sure [Ollama](https://ollama.com/) is installed, then run:
 
 ```bash
-ollama run codellama
+ollama run qwen2.5-coder:1.5b
 ```
 
-Or use your preferred model that supports code generation.
+This will download and start the Qwen 2.5 Coder model optimized for code generation.
 
 ### 5. Run the Development Server
 
